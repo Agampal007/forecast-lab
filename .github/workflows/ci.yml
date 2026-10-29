@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+
+  api-smoke-test:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - name: Start the API and request a forecast
+        run: |
+          forecastlab serve --port 8000 &
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+          python - <<'PY' | tee forecast.json
+          import json, urllib.request
+          from forecastlab.data import make_demand
+          body = json.dumps({"values": [round(float(v), 2) for v in make_demand(400)], "horizon": 7}).encode()
+          req = urllib.request.Request("http://localhost:8000/forecast", body, {"content-type": "application/json"})
+          out = json.load(urllib.request.urlopen(req))
+          assert len(out["forecast"]) == 7 and out["lower"] and out["upper"]
+          print(json.dumps(out))
+          PY
+          { echo "### API smoke test"; echo; echo '```json'; cat forecast.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t forecast-lab .
+      - name: Container answers on /health
+        run: |
+          docker run -d --name api -p 8000:8000 forecast-lab
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+          curl -sf localhost:8000/health
+
+  backtest:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[plots]"
+      - name: Rolling-origin backtest with 80% prediction intervals
+        run: |
+          forecastlab backtest --level 0.8 --out results --plot results/forecast.png
+          { echo "### Backtest leaderboard"; echo; cat results/leaderboard.md; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-results
+          path: results/

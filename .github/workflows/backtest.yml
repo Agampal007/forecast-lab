@@ -1,0 +1,38 @@
+name: Run a backtest
+
+# Run from the Actions tab and choose the forecast horizon; the leaderboard appears in the job summary.
+on:
+  workflow_dispatch:
+    inputs:
+      horizon:
+        description: Forecast horizon in days
+        default: "28"
+        required: true
+      level:
+        description: Prediction interval level (0-1)
+        default: "0.8"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[plots]"
+      - name: Backtest
+        env:
+          HORIZON: ${{ inputs.horizon }}
+          LEVEL: ${{ inputs.level }}
+        run: |
+          forecastlab backtest --horizon "$HORIZON" --level "$LEVEL" --step "$HORIZON" --out results --plot results/forecast.png | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-results
+          path: results/
