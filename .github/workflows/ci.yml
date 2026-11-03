@@ -78,6 +78,16 @@ jobs:
         run: |
           forecastlab backtest --level 0.8 --out results --plot results/forecast.png
           { echo "### Backtest leaderboard"; echo; cat results/leaderboard.md; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Backtest on real NSW electricity demand (AEMO)
+        run: |
+          forecastlab backtest --csv datasets/aemo-nsw-daily.csv --initial 731 --level 0.8             --out results/aemo-nsw --plot results/aemo-nsw/forecast.png
+          {
+            echo; echo "### Backtest leaderboard: NSW electricity demand"; echo
+            cat results/aemo-nsw/leaderboard.md; echo
+            for pair in "gbm-lags ridge-lags" "ridge-lags holt-winters" "gbm-lags seasonal-naive"; do
+              python scripts/compare_models.py $pair --csv datasets/aemo-nsw-daily.csv --initial 731; echo
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: backtest-results
