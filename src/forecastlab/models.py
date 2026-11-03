@@ -1,7 +1,10 @@
 """Forecasting models behind one interface: `fit(y)` then `predict(h)`.
 
 The series is assumed to be regularly spaced and to start at index 0. Seasonal position is the
-index modulo the season length, so no calendar is needed.
+index modulo the season length, so no dates are needed. Models can optionally take a `calendar`:
+an array of known-in-advance flags (for example holidays from `forecastlab.calendar`) with one row
+per time index, covering the training data and the forecast horizon. Only the lag regressors use
+it; the other models ignore it.
 """
 
 from __future__ import annotations
@@ -20,10 +23,15 @@ class Forecaster:
     name = "base"
     description = ""
 
-    def __init__(self, season_length: int = 7):
+    def __init__(self, season_length: int = 7, calendar: np.ndarray | None = None):
         if season_length < 1:
             raise ValueError("season_length must be at least 1")
         self.m = season_length
+        if calendar is not None:
+            calendar = np.asarray(calendar, dtype=float)
+            if calendar.ndim != 2 or not np.all(np.isfinite(calendar)):
+                raise ValueError("calendar must be a finite 2-D array with one row per time index")
+        self.calendar = calendar
 
     def min_length(self) -> int:
         return 2
@@ -36,12 +44,19 @@ class Forecaster:
             raise ValueError("y contains NaN or infinite values")
         if len(y) < self.min_length():
             raise ValueError(f"{self.name} needs at least {self.min_length()} observations, got {len(y)}")
+        if self.calendar is not None and len(self.calendar) < len(y):
+            raise ValueError(f"calendar has {len(self.calendar)} rows but the series has {len(y)} points")
+        self._n_fit = len(y)
         self._fit(y)
         return self
 
     def predict(self, h: int) -> np.ndarray:
         if h < 1:
             raise ValueError("horizon must be at least 1")
+        if self.calendar is not None and len(self.calendar) < self._n_fit + h:
+            raise ValueError(
+                f"calendar has {len(self.calendar)} rows; forecasting {h} steps needs {self._n_fit + h}"
+            )
         return np.asarray(self._predict(h), dtype=float)
 
     def _fit(self, y: np.ndarray) -> None:
@@ -161,7 +176,9 @@ class _LagRegressor(Forecaster):
     """Recursive regression on lagged values and Fourier calendar terms.
 
     Every target and lag is expressed relative to the mean of the preceding season, which removes
-    the level so that tree models can handle a trending series.
+    the level so that tree models can handle a trending series. With a `calendar`, the flags for
+    the day being predicted and for the same day one season earlier are added as features: the
+    second lets the model discount a seasonal lag that fell on a holiday.
     """
 
     lags: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 14, 21, 28)
@@ -186,6 +203,8 @@ class _LagRegressor(Forecaster):
             for k in (1, 2):
                 angle = 2 * math.pi * k * t / self.yearly_period
                 feats += [math.sin(angle), math.cos(angle)]
+        if self.calendar is not None:
+            feats += self.calendar[t].tolist() + self.calendar[t - self.m].tolist()
         return feats
 
     def _row(self, history: np.ndarray, t: int) -> tuple[list[float], float]:
@@ -238,8 +257,8 @@ MODELS: dict[str, Callable[..., Forecaster]] = {
 }
 
 
-def make_model(name: str, season_length: int = 7) -> Forecaster:
+def make_model(name: str, season_length: int = 7, calendar: np.ndarray | None = None) -> Forecaster:
     try:
-        return MODELS[name](season_length=season_length)
+        return MODELS[name](season_length=season_length, calendar=calendar)
     except KeyError:
         raise KeyError(f"unknown model {name!r}; choose from {', '.join(MODELS)}") from None
