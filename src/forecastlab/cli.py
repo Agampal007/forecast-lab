@@ -17,6 +17,16 @@ def _series(args: argparse.Namespace) -> np.ndarray:
     return load_csv(args.csv, args.column) if args.csv else make_demand()
 
 
+def _series_label(args: argparse.Namespace) -> str:
+    """Name of the forecast column, matching load_csv's default of the last column."""
+    if not args.csv:
+        return "demand (synthetic)"
+    if args.column:
+        return args.column
+    with args.csv.open(encoding="utf-8") as handle:
+        return handle.readline().strip().split(",")[-1]
+
+
 def cmd_backtest(args: argparse.Namespace) -> int:
     y = _series(args)
     initial = args.initial or max(len(y) * 2 // 3, 10)
@@ -35,7 +45,7 @@ def cmd_backtest(args: argparse.Namespace) -> int:
         from .plots import forecast_plot
 
         best = rows[0]["model"]
-        path = forecast_plot(y, best, args.horizon, args.plot)
+        path = forecast_plot(y, best, args.horizon, args.plot, ylabel=_series_label(args))
         print(f"\nPlot of the best model ({best}) written to {path}")
     return 0
 

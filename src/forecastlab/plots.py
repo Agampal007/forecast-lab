@@ -11,7 +11,13 @@ from .models import make_model
 
 
 def forecast_plot(
-    y: np.ndarray, model: str, horizon: int, out: Path, level: float = 0.8, history: int = 120
+    y: np.ndarray,
+    model: str,
+    horizon: int,
+    out: Path,
+    level: float = 0.8,
+    history: int = 120,
+    ylabel: str = "demand",
 ) -> Path:
     import matplotlib
 
@@ -31,7 +37,7 @@ def forecast_plot(
         )
     ax.plot(t_fut, point, color="#2563eb", lw=1.8, label=f"{model} forecast")
     ax.set_xlabel("day")
-    ax.set_ylabel("demand (synthetic)")
+    ax.set_ylabel(ylabel)
     ax.set_title(f"Held-out {horizon}-day forecast")
     ax.legend(frameon=False, loc="upper left")
     for side in ("top", "right"):
