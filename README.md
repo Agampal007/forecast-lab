@@ -5,7 +5,7 @@
 
 Time-series forecasting done carefully: seven models behind one interface, a **rolling-origin backtest** that never trains on the future, **prediction intervals** whose real coverage is measured, and a small **FastAPI service**.
 
-The built-in series is synthetic (known trend, weekly and yearly seasonality, promotions, noise), so the results show how the methods behave, not how they would do on a real business. Bring your own data with `--csv`.
+Results are reported on two series: a synthetic one with known structure (trend, weekly and yearly seasonality, promotions, noise), and four years of **real NSW electricity demand from AEMO**. Bring your own data with `--csv`.
 
 ## Run it from GitHub
 
@@ -51,6 +51,50 @@ What the numbers support:
 - **The intervals are roughly calibrated.** Nominal 80% intervals covered 78-85% of held-out points. Intervals that look right on paper are common; measuring their coverage is the check.
 - **MASE near 1 is not a weak result.** MASE divides by the in-sample error of a 7-day seasonal-naive forecast, which is inflated by noise in both of the values being differenced. Compare models by their MASE ranking, not by distance from 1.
 
+## Results on real data: NSW electricity demand
+
+1,461 days of total NSW operational electricity demand (2022-2025, in GWh per day), built from
+AEMO's 5-minute price and demand files (source and attribution in [`datasets/`](datasets/README.md)).
+Twenty-six folds: train on the first 731 days (2022-2023), forecast the next 28, move forward 28
+days, refit, repeat. Same models, settings and 80% intervals as above. These numbers come from the
+CI run (Ubuntu, Python 3.12); gradient boosting shifts slightly with platform and scikit-learn
+version.
+
+```bash
+forecastlab backtest --csv datasets/aemo-nsw-daily.csv --initial 731 --level 0.8
+python scripts/compare_models.py gbm-lags seasonal-naive --csv datasets/aemo-nsw-daily.csv --initial 731
+```
+
+| Model | MAE (GWh) | RMSE | sMAPE % | MASE | Coverage of 80% interval | Mean width |
+| --- | --- | --- | --- | --- | --- | --- |
+| gbm-lags | 12.14 | 14.76 | 6.80 | 1.05 | 0.779 | 41.8 |
+| ridge-lags | 12.56 | 15.50 | 7.08 | 1.08 | 0.801 | 42.8 |
+| holt-winters | 14.75 | 17.61 | 8.32 | 1.27 | 0.777 | 48.7 |
+| moving-average | 15.74 | 18.91 | 8.85 | 1.36 | 0.784 | 52.2 |
+| seasonal-naive | 16.16 | 19.54 | 9.10 | 1.39 | 0.772 | 51.8 |
+| naive | 16.65 | 19.74 | 9.31 | 1.44 | 0.772 | 54.8 |
+| drift | 16.83 | 19.95 | 9.40 | 1.45 | 0.772 | 55.3 |
+
+![Held-out 28-day forecast of NSW demand, December 2025](docs/forecast-aemo-nsw.png)
+
+What changes on real data:
+
+- **The lag models still win, but by less.** Gradient boosting cuts MAE by 25% against
+  seasonal-naive (12.1 against 16.2 GWh, a paired difference of 4.0 ± 0.9, better in 23 of 26
+  folds), compared with about 30% on the synthetic series.
+- **Ridge and gradient boosting are still indistinguishable.** They differ by 0.41 GWh with a
+  paired standard error of 0.64 (14 folds to 12). Ridge beats Holt-Winters more clearly than on
+  synthetic data: 2.2 ± 0.8 GWh, 19 of 26 folds.
+- **The weekly cycle matters less than the weather.** Seasonal-naive is barely better than naive
+  (16.2 against 16.7), whereas on the synthetic series it halved the error. Real demand swings with
+  heat and cold over days, which no model here sees.
+- **The intervals stay calibrated.** 80% intervals covered 77-80% of held-out days for every
+  model, with no retuning.
+- **Holidays are the visible failure.** The plot ends with the 2025 Christmas period. Demand falls
+  from about 170 GWh just before Christmas to 125-141 GWh from 25 to 29 December, while the
+  forecast stays near 175, well outside its interval. The
+  models know the day of the week but not the calendar. A holiday feature is the next step.
+
 ## How it works
 
 - **Models** (`models.py`): naive, seasonal-naive, drift, moving average, damped additive Holt-Winters (parameters fitted by L-BFGS on one-step squared error), and two recursive regressors, `ridge-lags` and `gbm-lags`. The regressors use 10 lags and Fourier terms for the weekly cycle (and the yearly cycle once there are two years of data). Lags and targets are measured relative to the mean of the previous season, which removes the level so that gradient boosting copes with a trending series.
@@ -66,7 +110,7 @@ curl -s localhost:8000/forecast -H 'content-type: application/json' \
 
 ## Limitations
 
-- **Synthetic data, one series, one random seed.** Model rankings can change on real demand data, which has holidays, outages and structural breaks that this generator lacks.
+- **One synthetic series and one real one.** The NSW results show that rankings and margins do change on real data. Neither series uses weather or a holiday calendar, which are the main drivers of electricity demand.
 - **Regular spacing only.** Seasonal position is the index modulo `season_length`. Missing days or irregular timestamps must be filled in first, and no calendar (holidays, month lengths) is used.
 - **Intervals assume the future errors resemble recent errors.** They are symmetric and widen with the horizon only through the empirical errors; they can be too narrow after a regime change. Coverage here is an average over 13 folds, not a guarantee for any single forecast.
 - **Recursive forecasts compound errors** at long horizons; there is no direct multi-horizon model.
@@ -78,6 +122,7 @@ curl -s localhost:8000/forecast -H 'content-type: application/json' \
 ```
 src/forecastlab/
   data.py       synthetic demand generator, CSV loader
+  aemo.py       AEMO 5- and 30-minute files -> daily GWh
   models.py     seven forecasters, registry
   metrics.py    MAE, RMSE, sMAPE, MASE, interval coverage
   intervals.py  rolling-origin calibration of prediction intervals
@@ -85,7 +130,9 @@ src/forecastlab/
   api.py        FastAPI service
   cli.py        forecastlab backtest | forecast | serve | models
   plots.py      forecast plot (optional matplotlib)
-tests/          34 tests: models, leakage, metrics, interval coverage, API, CLI
+datasets/       NSW daily demand from AEMO (with attribution)
+scripts/        AEMO download, paired model comparison
+tests/          42 tests: models, leakage, metrics, interval coverage, AEMO parsing, API, CLI
 ```
 
 ## License
