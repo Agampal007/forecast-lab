@@ -18,8 +18,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.5"]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.5", "holidays>=0.50"]
 plots = ["matplotlib>=3.8"]
+calendar = ["holidays>=0.50"]
 
 [project.scripts]
 forecastlab = "forecastlab.cli:main"
