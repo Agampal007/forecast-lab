@@ -92,8 +92,43 @@ What changes on real data:
   model, with no retuning.
 - **Holidays are the visible failure.** The plot ends with the 2025 Christmas period. Demand falls
   from about 170 GWh just before Christmas to 125-141 GWh from 25 to 29 December, while the
-  forecast stays near 175, well outside its interval. The
-  models know the day of the week but not the calendar. A holiday feature is the next step.
+  forecast stays near 175, well outside its interval. The models know the day of the week but not
+  the calendar.
+
+### Adding holiday features
+
+`--holidays NSW` gives the lag models two known-in-advance flags: NSW public holidays (from the
+[`holidays`](https://pypi.org/project/holidays/) package) and a year-end break from 24 December to
+2 January. Each model sees the flags for the day it predicts and for the same weekday a week
+earlier, so it can also discount a weekly lag that fell on a holiday. The flags were fixed by
+convention before testing, not tuned on this data. Same 26 folds as above; numbers from CI.
+
+```bash
+pip install -e ".[calendar]"
+forecastlab backtest --csv datasets/aemo-nsw-daily.csv --initial 731 --level 0.8 --holidays NSW
+python scripts/holiday_effect.py --csv datasets/aemo-nsw-daily.csv --initial 731 --region NSW
+```
+
+| Model | Holiday features | MAE, all days | MAE, 33 flagged days | MAE, other days |
+| --- | --- | --- | --- | --- |
+| ridge-lags | no | 12.56 | 26.81 | 11.88 |
+| ridge-lags | **yes** | **11.91** | **20.85** | **11.49** |
+| gbm-lags | no | 12.14 | 24.15 | 11.57 |
+| gbm-lags | yes | 12.04 | 20.70 | 11.63 |
+
+![Held-out 28-day forecast of NSW demand with holiday features, December 2025](docs/forecast-aemo-nsw-holidays.png)
+
+- **Ridge improves clearly.** Overall MAE falls by 0.64 GWh (paired standard error 0.22, better in
+  19 of 26 folds), and ridge with holidays is now the best model on this series. Error on flagged
+  days falls by 22%.
+- **Ordinary days improve too.** Ridge's error on unflagged days drops from 11.88 to 11.49 GWh
+  because the lagged-holiday flag stops a holiday from dragging down the next week's forecast.
+- **Gradient boosting gains only on the flagged days.** Their error falls by 14%, but the overall
+  change (-0.11 ± 0.26) is within noise. With two years of training data it sees only about 40
+  flagged days, few for trees to learn a split from.
+- **Holidays are still the hardest days.** Flagged-day error is still almost twice that of other
+  days. Over Christmas 2025 the forecast now dips to about 152 GWh, against 125-141 actual and 175
+  without the flags. The 80% interval stays calibrated (0.805 for ridge).
 
 ## How it works
 
@@ -110,7 +145,7 @@ curl -s localhost:8000/forecast -H 'content-type: application/json' \
 
 ## Limitations
 
-- **One synthetic series and one real one.** The NSW results show that rankings and margins do change on real data. Neither series uses weather or a holiday calendar, which are the main drivers of electricity demand.
+- **One synthetic series and one real one.** The NSW results show that rankings and margins do change on real data. Neither uses weather, the main driver of electricity demand; the NSW backtests can add holiday flags, which help but leave holidays as the hardest days.
 - **Regular spacing only.** Seasonal position is the index modulo `season_length`. Missing days or irregular timestamps must be filled in first, and no calendar (holidays, month lengths) is used.
 - **Intervals assume the future errors resemble recent errors.** They are symmetric and widen with the horizon only through the empirical errors; they can be too narrow after a regime change. Coverage here is an average over 13 folds, not a guarantee for any single forecast.
 - **Recursive forecasts compound errors** at long horizons; there is no direct multi-horizon model.
@@ -123,6 +158,7 @@ curl -s localhost:8000/forecast -H 'content-type: application/json' \
 src/forecastlab/
   data.py       synthetic demand generator, CSV loader
   aemo.py       AEMO 5- and 30-minute files -> daily GWh
+  calendar.py   public-holiday and year-end flags (optional holidays package)
   models.py     seven forecasters, registry
   metrics.py    MAE, RMSE, sMAPE, MASE, interval coverage
   intervals.py  rolling-origin calibration of prediction intervals
@@ -131,8 +167,8 @@ src/forecastlab/
   cli.py        forecastlab backtest | forecast | serve | models
   plots.py      forecast plot (optional matplotlib)
 datasets/       NSW daily demand from AEMO (with attribution)
-scripts/        AEMO download, paired model comparison
-tests/          42 tests: models, leakage, metrics, interval coverage, AEMO parsing, API, CLI
+scripts/        AEMO download, paired model comparison, holiday-feature effect
+tests/          51 tests: models, leakage, metrics, interval coverage, AEMO parsing, holidays, API, CLI
 ```
 
 ## License
