@@ -87,7 +87,7 @@ jobs:
             for pair in "gbm-lags ridge-lags" "ridge-lags holt-winters" "gbm-lags seasonal-naive"; do
               python scripts/compare_models.py $pair --csv datasets/aemo-nsw-daily.csv --initial 731; echo
             done
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: backtest-results
