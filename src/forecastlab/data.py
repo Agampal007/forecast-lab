@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -44,3 +45,20 @@ def load_csv(path: str | Path, column: str | None = None) -> np.ndarray:
     if not np.all(np.isfinite(arr)):
         raise ValueError(f"{path}: column {column!r} contains NaN or infinite values")
     return arr
+
+
+def load_dates(path: str | Path, column: str = "date") -> list[date]:
+    """Read ISO dates (YYYY-MM-DD) from a CSV column; they must be consecutive days."""
+    with Path(path).open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames or column not in reader.fieldnames:
+            raise ValueError(f"{path}: no {column!r} column; holiday features need one")
+        dates = []
+        for number, row in enumerate(reader, start=2):
+            try:
+                dates.append(date.fromisoformat(row[column]))
+            except ValueError as error:
+                raise ValueError(f"{path}:{number}: {row[column]!r} is not a YYYY-MM-DD date") from error
+    if any((b - a).days != 1 for a, b in zip(dates, dates[1:], strict=False)):
+        raise ValueError(f"{path}: dates must be consecutive days")
+    return dates

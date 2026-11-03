@@ -18,6 +18,7 @@ def forecast_plot(
     level: float = 0.8,
     history: int = 120,
     ylabel: str = "demand",
+    calendar: np.ndarray | None = None,
 ) -> Path:
     import matplotlib
 
@@ -25,7 +26,9 @@ def forecast_plot(
     import matplotlib.pyplot as plt
 
     train, test = y[:-horizon], y[-horizon:]
-    point, lower, upper = forecast_with_interval(lambda: make_model(model), train, horizon, level)
+    point, lower, upper = forecast_with_interval(
+        lambda: make_model(model, calendar=calendar), train, horizon, level
+    )
     t_hist = np.arange(len(train) - history, len(train))
     t_fut = np.arange(len(train), len(train) + horizon)
     fig, ax = plt.subplots(figsize=(9, 4), dpi=120)

@@ -53,7 +53,7 @@ def test_backtest_never_trains_on_the_test_window():
     import forecastlab.backtest as module
 
     original = module.make_model
-    module.make_model = lambda name, m=7: Spy(season_length=m)
+    module.make_model = lambda name, m=7, calendar=None: Spy(season_length=m, calendar=calendar)
     try:
         y = np.arange(100.0)
         bt.backtest_model("spy", y, horizon=10, initial=60, step=10)

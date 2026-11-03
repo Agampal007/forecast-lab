@@ -73,7 +73,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e ".[plots]"
+      - run: pip install -e ".[plots,calendar]"
       - name: Rolling-origin backtest with 80% prediction intervals
         run: |
           forecastlab backtest --level 0.8 --out results --plot results/forecast.png
@@ -87,6 +87,15 @@ jobs:
             for pair in "gbm-lags ridge-lags" "ridge-lags holt-winters" "gbm-lags seasonal-naive"; do
               python scripts/compare_models.py $pair --csv datasets/aemo-nsw-daily.csv --initial 731; echo
             done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Backtest on NSW demand with holiday features
+        run: |
+          forecastlab backtest --csv datasets/aemo-nsw-daily.csv --initial 731 --level 0.8 --holidays NSW             --out results/aemo-nsw-holidays --plot results/aemo-nsw-holidays/forecast.png
+          {
+            echo; echo "### Backtest leaderboard: NSW demand with holiday features"; echo
+            cat results/aemo-nsw-holidays/leaderboard.md; echo
+            echo "### Effect of holiday features"; echo
+            python scripts/holiday_effect.py --csv datasets/aemo-nsw-daily.csv --initial 731 --region NSW
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:

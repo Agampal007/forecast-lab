@@ -8,13 +8,27 @@ from pathlib import Path
 import numpy as np
 
 from .backtest import leaderboard, to_markdown
-from .data import load_csv, make_demand
+from .data import load_csv, load_dates, make_demand
 from .intervals import forecast_with_interval
 from .models import MODELS, make_model
 
 
 def _series(args: argparse.Namespace) -> np.ndarray:
     return load_csv(args.csv, args.column) if args.csv else make_demand()
+
+
+def _calendar(args: argparse.Namespace, n: int, horizon: int = 0) -> np.ndarray | None:
+    """Holiday flags for the series plus `horizon` future days, or None without --holidays."""
+    if not args.holidays:
+        return None
+    if not args.csv:
+        raise SystemExit("--holidays needs --csv with a 'date' column")
+    from .calendar import extend_dates, holiday_flags
+
+    dates = load_dates(args.csv)
+    if len(dates) != n:
+        raise SystemExit(f"{args.csv}: {len(dates)} dates for {n} values")
+    return holiday_flags(extend_dates(dates, horizon), region=args.holidays)
 
 
 def _series_label(args: argparse.Namespace) -> str:
@@ -30,9 +44,14 @@ def _series_label(args: argparse.Namespace) -> str:
 def cmd_backtest(args: argparse.Namespace) -> int:
     y = _series(args)
     initial = args.initial or max(len(y) * 2 // 3, 10)
-    rows = leaderboard(y, args.models, args.horizon, initial, args.step, args.season_length, args.level)
+    calendar = _calendar(args, len(y))
+    rows = leaderboard(
+        y, args.models, args.horizon, initial, args.step, args.season_length, args.level, calendar
+    )
     table = to_markdown(rows, args.level)
     source = args.csv or "synthetic demand (seed 0)"
+    if args.holidays:
+        source = f"{source} with {args.holidays} holiday features"
     print(
         f"Rolling-origin backtest on {source}: {len(y)} points, horizon {args.horizon}, "
         f"initial {initial}, step {args.step}\n"
@@ -45,15 +64,16 @@ def cmd_backtest(args: argparse.Namespace) -> int:
         from .plots import forecast_plot
 
         best = rows[0]["model"]
-        path = forecast_plot(y, best, args.horizon, args.plot, ylabel=_series_label(args))
+        path = forecast_plot(y, best, args.horizon, args.plot, ylabel=_series_label(args), calendar=calendar)
         print(f"\nPlot of the best model ({best}) written to {path}")
     return 0
 
 
 def cmd_forecast(args: argparse.Namespace) -> int:
     y = _series(args)
+    calendar = _calendar(args, len(y), args.horizon)
     point, lower, upper = forecast_with_interval(
-        lambda: make_model(args.model, args.season_length), y, args.horizon, args.level
+        lambda: make_model(args.model, args.season_length, calendar), y, args.horizon, args.level
     )
     print("step,forecast,lower,upper")
     for i, value in enumerate(point):
@@ -81,6 +101,12 @@ def _add_series_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--column", help="column to forecast (default: last column)")
     p.add_argument("--season-length", type=int, default=7)
     p.add_argument("--horizon", type=int, default=28)
+    p.add_argument(
+        "--holidays",
+        metavar="REGION",
+        help="add public-holiday and year-end features for an Australian state, e.g. NSW "
+        "(needs a 'date' column and pip install holidays)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

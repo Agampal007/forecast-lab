@@ -37,14 +37,18 @@ def backtest_model(
     step: int = 28,
     season_length: int = 7,
     level: float | None = None,
+    calendar: np.ndarray | None = None,
 ) -> list[FoldScore]:
-    """Backtest one model. Pass `level` (for example 0.8) to also score prediction intervals."""
+    """Backtest one model. Pass `level` (for example 0.8) to also score prediction intervals.
+
+    `calendar` (see `forecastlab.models`) must have a row for every point of `y`.
+    """
     folds = []
     for origin in origins(len(y), horizon, initial, step):
         train, test = y[:origin], y[origin : origin + horizon]
 
         def factory(name=name):
-            return make_model(name, season_length)
+            return make_model(name, season_length, calendar)
 
         if level is None:
             pred = factory().fit(train).predict(horizon)
@@ -91,10 +95,11 @@ def leaderboard(
     step: int = 28,
     season_length: int = 7,
     level: float | None = None,
+    calendar: np.ndarray | None = None,
 ) -> list[dict]:
     rows = []
     for name in models or list(MODELS):
-        folds = backtest_model(name, y, horizon, initial, step, season_length, level)
+        folds = backtest_model(name, y, horizon, initial, step, season_length, level, calendar)
         rows.append({"model": name, **summarise(folds)})
     return sorted(rows, key=lambda r: r["mase"])
 
